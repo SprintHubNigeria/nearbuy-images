@@ -20,12 +20,14 @@ func TestDownloadImage(t *testing.T) {
 		testName  string
 		testURL   string
 		testCtx   context.Context
+		fileName  string
 		assertion func(*testing.T, *image.Image, error)
 	}{
 		{
 			"Downloading from a broken URL",
 			fmt.Sprintf("%s/image/image.png", srvUrl),
-			context.WithValue(context.Background(), image.FileName, "image.png"),
+			context.Background(),
+			"image.png",
 			func(t *testing.T, img *image.Image, err error) {
 				assert.Nil(t, img, "Should return an empty byte slice")
 				assert.Error(t, err, "Should also returns an error")
@@ -34,7 +36,8 @@ func TestDownloadImage(t *testing.T) {
 		{
 			"Downloading from a non-broken URL",
 			fmt.Sprintf("%s/image/sunset.jpg", srvUrl),
-			context.WithValue(context.Background(), image.FileName, "sunset.png"),
+			context.Background(),
+			"sunset.png",
 			func(t *testing.T, img *image.Image, err error) {
 				assert.NotNil(t, img, "Should return the image data")
 				assert.Nil(t, err, "Should not return an error")
@@ -44,6 +47,7 @@ func TestDownloadImage(t *testing.T) {
 			"Passing an empty file name",
 			fmt.Sprintf("%s/image/sunset.jpg", srvUrl),
 			context.Background(),
+			"",
 			func(t *testing.T, img *image.Image, err error) {
 				assert.Nil(t, img, "Should not return any image data")
 				assert.Error(t, err, "Should return an error")
@@ -52,7 +56,7 @@ func TestDownloadImage(t *testing.T) {
 	}
 	for _, tc := range tt {
 		t.Run(tc.testName, func(t *testing.T) {
-			img, err := image.DownloadImage(tc.testCtx, &client, tc.testURL)
+			img, err := image.DownloadImage(tc.testCtx, &client, tc.testURL, tc.fileName)
 			tc.assertion(t, img, err)
 		})
 	}

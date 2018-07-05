@@ -34,11 +34,9 @@ type filename string
 var FileName = filename("fileName")
 
 // DownloadImage fetches the image from the source url
-func DownloadImage(ctx context.Context, client *http.Client, url string) (*Image, error) {
-	f := ctx.Value(FileName)
-	fileName, ok := f.(string)
-	if !ok {
-		return nil, fmt.Errorf("Cannot use filename: %q of type %T as string", fileName, f)
+func DownloadImage(ctx context.Context, client *http.Client, url, fileName string) (*Image, error) {
+	if fileName == "" {
+		return nil, fmt.Errorf("No file name given")
 	}
 	resp, err := client.Get(url)
 	if err != nil {
@@ -82,7 +80,7 @@ func (img *Image) SaveToGCS(ctx context.Context, bucketName string) error {
 
 // CreateServingURL returns a serving URL for an image in cloud storage
 func (img *Image) CreateServingURL(ctx context.Context, bucketName string) (string, error) {
-	blobKey, err := blobstore.BlobKeyForFile(ctx, "/gs/"+bucketName+img.FileName)
+	blobKey, err := blobstore.BlobKeyForFile(ctx, fmt.Sprintf("/gs/%s/%s", bucketName, img.FileName))
 	if err != nil {
 		return "", err
 	}
@@ -99,7 +97,7 @@ func (img *Image) CreateServingURL(ctx context.Context, bucketName string) (stri
 
 // DeleteServingURL makes the serving URL unavailable
 func (img *Image) DeleteServingURL(ctx context.Context, bucketName string) error {
-	key, err := blobstore.BlobKeyForFile(ctx, "/gs/"+bucketName+img.FileName)
+	key, err := blobstore.BlobKeyForFile(ctx, fmt.Sprintf("/gs/%s/%s", bucketName, img.FileName))
 	if err != nil {
 		return err
 	}
