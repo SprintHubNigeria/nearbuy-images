@@ -1,0 +1,24 @@
+service: default
+runtime: go
+api_version: go1
+instance_class: F1
+automatic_scaling:
+  min_idle_instances: 0
+  max_idle_instances: 1  # default value
+  min_pending_latency: 30ms  # default value
+  max_pending_latency: automatic
+  max_concurrent_requests: 50
+
+inbound_services:
+- warmup
+
+handlers:
+- url: /servingURL
+  script: _go_app
+- url: /_ah/warmup
+  script: _go_app
+  login: admin
+
+env_variables:
+  GCS_STORAGE_BUCKET: 'sprinthub-cowork.appspot.com'
+  PRODUCT_IMAGES_DIR: 'products'
