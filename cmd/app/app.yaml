@@ -15,9 +15,6 @@ inbound_services:
 handlers:
 - url: /servingURL
   script: _go_app
-- url: /_ah/warmup
-  script: _go_app
-  login: admin
 
 env_variables:
   GCS_STORAGE_BUCKET: 'sprinthub-cowork.appspot.com'
