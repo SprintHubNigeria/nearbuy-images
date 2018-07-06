@@ -1,0 +1,6 @@
+queue:
+- name: external-image-urls
+  target: nearbuy-images
+  rate: 10/s
+  bucket_size: 20
+  max_concurrent_requests: 5

@@ -5,6 +5,8 @@ import (
 	"io/ioutil"
 	"net/http"
 
+	"github.com/pkg/errors"
+
 	"google.golang.org/appengine/blobstore"
 	"google.golang.org/appengine/image"
 
@@ -40,15 +42,12 @@ func DownloadImage(ctx context.Context, client *http.Client, url, fileName strin
 	}
 	resp, err := client.Get(url)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "Could not download image")
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Image not found")
-	}
 	b, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrapf(err, "Could not read image body: Status - %d %s", resp.StatusCode, resp.Status)
 	}
 	return &Image{
 		FileName:    fileName,
@@ -70,10 +69,10 @@ func (img *Image) SaveToGCS(ctx context.Context, bucketName string) error {
 		"x-goog-meta-source": img.OriginalURL,
 	}
 	if _, err := wc.Write(img.Data); err != nil {
-		return fmt.Errorf("Could not write image to file %q: %v", img.FileName, err)
+		return errors.Wrapf(err, "Could not write image to file %q", img.FileName)
 	}
 	if err := wc.Close(); err != nil {
-		return fmt.Errorf("Could not close bucket %q, file %q: %v", bucketName, img.FileName, err)
+		return errors.Wrapf(err, "Could not close bucket %q, file %q", bucketName, img.FileName)
 	}
 	return nil
 }
