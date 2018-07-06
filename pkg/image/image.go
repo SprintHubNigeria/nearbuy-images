@@ -1,9 +1,12 @@
 package image
 
 import (
+	"database/sql"
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/pkg/errors"
 
@@ -45,6 +48,9 @@ func DownloadImage(ctx context.Context, client *http.Client, url, fileName strin
 		return nil, errors.Wrap(err, "Could not download image")
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("Could not download image: Got status %d %s", resp.StatusCode, resp.Status)
+	}
 	b, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return nil, errors.Wrapf(err, "Could not read image body: Status - %d %s", resp.StatusCode, resp.Status)
@@ -110,4 +116,20 @@ func (img *Image) DeleteFromGCS(ctx context.Context, bucketName string) error {
 		return err
 	}
 	return client.Bucket(bucketName).Object(img.FileName).Delete(ctx)
+}
+
+// SaveURLToDB stores the serving URL and the GCS image location in the database
+func (img *Image) SaveURLToDB(ctx context.Context, db *sql.Conn) error {
+	parts := strings.Split(img.FileName, "/")
+	ID, err := strconv.Atoi(parts[len(parts)-1])
+	if err != nil {
+		return err
+	}
+	_, err = db.ExecContext(ctx,
+		"UPDATE products SET image_url = ?, image_location = ? WHERE id = ?",
+		img.ServingURL, img.FileName, ID)
+	if err != nil {
+		return errors.Wrapf(err, "Saving image URL and location failed")
+	}
+	return nil
 }

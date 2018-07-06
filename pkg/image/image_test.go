@@ -29,7 +29,7 @@ func TestDownloadImage(t *testing.T) {
 			context.Background(),
 			"image.png",
 			func(t *testing.T, img *image.Image, err error) {
-				assert.Nil(t, img, "Should return an empty byte slice")
+				assert.Nil(t, img, "Should return nil")
 				assert.Error(t, err, "Should also returns an error")
 			},
 		},

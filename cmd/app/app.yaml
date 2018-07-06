@@ -15,7 +15,14 @@ inbound_services:
 handlers:
 - url: /servingURL
   script: _go_app
+- url: /servingURLExternal
+  script: _go_app
+  login: admin
+- url: /_ah/warmup
+  script: _go_app
 
 env_variables:
   GCS_STORAGE_BUCKET: 'sprinthub-cowork.appspot.com'
-  PRODUCT_IMAGES_DIR: 'products'
+  PRODUCT_IMAGES_DIR: 'products/images'
+  MYSQL_DATABASE_URL: 'root:root@cloudsql(sprinthub-cowork:us-central1:sprinthub)/nearbuy'
+  

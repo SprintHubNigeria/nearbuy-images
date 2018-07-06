@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -9,6 +10,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	// MySQL driver for database connection
+	_ "github.com/go-sql-driver/mysql"
 
 	internalErrors "github.com/SprintHubNigeria/nearbuy-images/pkg/errors"
 
@@ -23,18 +27,31 @@ import (
 )
 
 const (
-	externalImageURL = "externalImageUrl"
-	productID        = "productId"
+	externalImageURL = "externalImageURL"
+	productID        = "productID"
+	callbackURL      = "callbackURL"
 )
 
 var (
 	bucketName             = os.Getenv("GCS_STORAGE_BUCKET")
 	productImagesDirectory = os.Getenv("PRODUCT_IMAGES_DIR")
 	once                   = sync.Once{}
+	mysqlURL               = os.Getenv("MYSQL_DATABASE_URL")
+	db                     *sql.DB
 )
 
 func main() {
+	var err error
+	db, err = sql.Open("mysql", mysqlURL)
+	if err != nil {
+		panic(err)
+	}
+	defer db.Close()
+	if err = db.Ping(); err != nil {
+		panic(err)
+	}
 	http.HandleFunc("/_ah/warmup", warmUp)
+	http.HandleFunc("/servingURLExternal", servingURLExternal)
 	http.HandleFunc("/servingURL", func(w http.ResponseWriter, r *http.Request) {
 		once.Do(func() {
 			ensureEnvVars(appengine.NewContext(r))
@@ -53,68 +70,112 @@ func main() {
 
 func warmUp(w http.ResponseWriter, r *http.Request) {
 	ensureEnvVars(appengine.NewContext(r))
+	w.WriteHeader(http.StatusOK)
+	return
+}
+
+type queryParams struct {
+	imageName string
+	imageURL  string
+}
+
+func requireQueryParams(r *http.Request) (*queryParams, error) {
+	query := r.URL.Query()
+	imageName := query.Get(productID)
+	imageURL := query.Get(externalImageURL)
+	if imageName == "" {
+		return nil, fmt.Errorf("No product ID in request query")
+	}
+	if imageURL == "" {
+		return nil, fmt.Errorf("No external URL in request query")
+	}
+	return &queryParams{
+		imageName: imageName,
+		imageURL:  imageURL,
+	}, nil
 }
 
 func routeGetServingURL(w http.ResponseWriter, r *http.Request) {
-	product, externalURL := extractQueryParams(r)
-	if ok, reason := requireQueryParams(w, product, externalURL); !ok {
+	query, err := requireQueryParams(r)
+	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(reason))
+		w.Write([]byte(err.Error()))
 		return
 	}
 	ctx := appengine.NewContext(r)
-	var (
-		servingURL string
-		err        error
-	)
-	if strings.HasPrefix(externalURL, "http") {
-		if r.Header.Get("X-AppEngine-QueueName") == "" {
-			if err := sendToTaskQueue(ctx, product, externalURL); err != nil {
-				log.Criticalf(ctx, "%+v\n", err)
-				w.WriteHeader(http.StatusInternalServerError)
-				w.Write([]byte("Could not enqueue task"))
-				return
-			}
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(""))
+	if strings.HasPrefix(query.imageURL, "http") {
+		if err := sendToTaskQueue(ctx, query); err != nil {
+			log.Criticalf(ctx, "%+v\n", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte("Could not enqueue task"))
 			return
 		}
-		servingURL, err = getServingURLExternal(ctx, product, externalURL)
-	} else {
-		servingURL, err = getServingURLFromGCS(ctx, externalURL)
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(""))
+		return
 	}
+	_, err = makeServingURLFromGCS(ctx, query.imageURL)
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
 		w.Write([]byte(err.Error()))
 		return
 	}
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(servingURL))
+	// if err = replyWithServingURL(ctx, servingURL, query.callbackURL); err != nil {
+	// 	w.WriteHeader(http.StatusInternalServerError)
+	// 	w.Write([]byte(""))
+	// 	return
+	// }
+	w.Write([]byte(""))
 	return
 }
 
-func extractQueryParams(r *http.Request) (product, externalURL string) {
-	query := r.URL.Query()
-	return query.Get(productID), query.Get(externalImageURL)
+func servingURLExternal(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("X-AppEngine-QueueName") == "" {
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(""))
+		return
+	}
+	query, err := requireQueryParams(r)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(err.Error()))
+		return
+	}
+	ctx := appengine.NewContext(r)
+	_, err = makeServingURLFromExternal(ctx, query.imageName, query.imageURL)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(err.Error()))
+		return
+	}
+	// if err = replyWithServingURL(ctx, servingURL, query.callbackURL); err != nil {
+	// 	w.WriteHeader(http.StatusInternalServerError)
+	// 	w.Write([]byte(""))
+	// 	return
+	// }
+	w.Write([]byte(""))
+	return
 }
 
-func requireQueryParams(w http.ResponseWriter, product, externalImageURL string) (bool, string) {
-	if product == "" {
-		return false, "No product ID in request query"
-	}
-	if externalImageURL == "" {
-		return false, "No external URL in request query"
-	}
-	return true, ""
-}
+// func replyWithServingURL(ctx context.Context, servingURL, callback string) error {
+// 	client := urlfetch.Client(ctx)
+// 	body := bytes.NewReader([]byte(servingURL))
+// 	resp, err := client.Post(callback, "text/plain", body)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	log.Infof(ctx, "Sent serving URL to callback %s. Response: %d %s", callback, resp.StatusCode, resp.Status)
+// 	defer resp.Body.Close()
+// 	return nil
+// }
 
-func sendToTaskQueue(ctx context.Context, product, externalURL string) error {
+func sendToTaskQueue(ctx context.Context, query *queryParams) error {
 	params := url.Values{}
-	params.Add(productID, product)
-	params.Add(externalImageURL, externalURL)
+	params.Add(productID, query.imageName)
+	params.Add(externalImageURL, query.imageURL)
 	task := taskqueue.Task{
 		Method:       http.MethodGet,
-		Path:         "/servingURL?" + params.Encode(),
+		Path:         "/servingURLExternal?" + params.Encode(),
 		RetryOptions: &taskqueue.RetryOptions{RetryLimit: 2, MinBackoff: time.Duration(2 * time.Second)},
 	}
 	if _, err := taskqueue.Add(ctx, &task, "external-image-urls"); err != nil {
@@ -123,7 +184,7 @@ func sendToTaskQueue(ctx context.Context, product, externalURL string) error {
 	return nil
 }
 
-func getServingURLExternal(ctx context.Context, fileName, externalURL string) (string, error) {
+func makeServingURLFromExternal(ctx context.Context, fileName, externalURL string) (string, error) {
 	client := urlfetch.Client(ctx)
 	img, err := image.DownloadImage(ctx, client, externalURL, relativeFilePath(fileName))
 	if err != nil {
@@ -139,12 +200,36 @@ func getServingURLExternal(ctx context.Context, fileName, externalURL string) (s
 		log.Criticalf(ctx, "%+v\n", err)
 		return "", internalErrors.ErrMakeServingURLFailed
 	}
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		log.Criticalf(ctx, "%+v\n", err)
+		return "", internalErrors.ErrSaveToDBFailed
+	}
+	defer conn.Close()
+	if err = img.SaveURLToDB(ctx, conn); err != nil {
+		log.Criticalf(ctx, "%+v\n", err)
+		return "", err
+	}
 	return servingURL, nil
 }
 
-func getServingURLFromGCS(ctx context.Context, gcsFileName string) (string, error) {
+func makeServingURLFromGCS(ctx context.Context, gcsFileName string) (string, error) {
 	img := &image.Image{FileName: gcsFileName}
-	return img.CreateServingURL(ctx, bucketName)
+	URL, err := img.CreateServingURL(ctx, bucketName)
+	if err != nil {
+		return "", err
+	}
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		log.Criticalf(ctx, "%+v\n", err)
+		return "", internalErrors.ErrSaveToDBFailed
+	}
+	defer conn.Close()
+	if err = img.SaveURLToDB(ctx, conn); err != nil {
+		log.Criticalf(ctx, "%+v\n", err)
+		return "", internalErrors.ErrSaveToDBFailed
+	}
+	return URL, nil
 }
 
 func deleteServingURL(w http.ResponseWriter, r *http.Request) {
@@ -178,8 +263,9 @@ func relativeFilePath(fileName string) string {
 }
 
 func ensureEnvVars(ctx context.Context) {
+	errTemplate := "Missing environment variable %s"
 	if productImagesDirectory == "" {
-		panic("Missing environment variable PRODUCT_IMAGES_DIRECTORY")
+		panic(fmt.Sprintf(errTemplate, "PRODUCT_IMAGES_DIRECTORY"))
 	}
 	if bucketName == "" {
 		var err error
@@ -187,5 +273,8 @@ func ensureEnvVars(ctx context.Context) {
 		if err != nil {
 			panic(err)
 		}
+	}
+	if mysqlURL == "" {
+		panic(fmt.Sprintf(errTemplate, "MYSQL_DATABASE_URL"))
 	}
 }
