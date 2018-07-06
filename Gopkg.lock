@@ -22,6 +22,12 @@
   version = "v1.1.0"
 
 [[projects]]
+  name = "github.com/go-sql-driver/mysql"
+  packages = ["."]
+  revision = "d523deb1b23d913de5bdada721a6071e71283618"
+  version = "v1.4.0"
+
+[[projects]]
   name = "github.com/golang/protobuf"
   packages = [
     "proto",
@@ -39,6 +45,12 @@
   packages = ["."]
   revision = "317e0006254c44a0ac427cc52a0e083ff0b9622f"
   version = "v2.0.0"
+
+[[projects]]
+  name = "github.com/pkg/errors"
+  packages = ["."]
+  revision = "645ef00459ed84a119197bfb8d8205042c6df63d"
+  version = "v0.8.0"
 
 [[projects]]
   name = "github.com/pmezard/go-difflib"
@@ -153,7 +165,9 @@
   packages = [
     ".",
     "blobstore",
+    "cloudsql",
     "datastore",
+    "file",
     "image",
     "internal",
     "internal/app_identity",
@@ -164,8 +178,10 @@
     "internal/log",
     "internal/modules",
     "internal/remote_api",
+    "internal/taskqueue",
     "internal/urlfetch",
     "log",
+    "taskqueue",
     "urlfetch"
   ]
   revision = "b1f26356af11148e710935ed1ac8a7f5702c7612"
@@ -217,6 +233,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "75e22077617fc23dca668147f8074cc28b4d99a5a1bc863dbe50233902102b8c"
+  inputs-digest = "cfda07aa89e61b527ca710c9ed99aea4605d5304f7bbe71880595c2d0c5bbe55"
   solver-name = "gps-cdcl"
   solver-version = 1
