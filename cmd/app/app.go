@@ -79,31 +79,23 @@ type queryParams struct {
 	imageURL  string
 }
 
-func requireQueryParams(r *http.Request) (*queryParams, error) {
+func makeQueryParams(r *http.Request) *queryParams {
 	query := r.URL.Query()
-	imageName := query.Get(productID)
-	imageURL := query.Get(externalImageURL)
-	if imageName == "" {
-		return nil, fmt.Errorf("No product ID in request query")
-	}
-	if imageURL == "" {
-		return nil, fmt.Errorf("No external URL in request query")
-	}
 	return &queryParams{
-		imageName: imageName,
-		imageURL:  imageURL,
-	}, nil
+		imageName: query.Get(productID),
+		imageURL:  query.Get(externalImageURL),
+	}
 }
 
 func routeGetServingURL(w http.ResponseWriter, r *http.Request) {
-	query, err := requireQueryParams(r)
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(err.Error()))
-		return
-	}
+	query := makeQueryParams(r)
 	ctx := appengine.NewContext(r)
 	if strings.HasPrefix(query.imageURL, "http") {
+		if query.imageURL == "" || query.imageName == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(""))
+			return
+		}
 		if err := sendToTaskQueue(ctx, query); err != nil {
 			log.Criticalf(ctx, "%+v\n", err)
 			w.WriteHeader(http.StatusInternalServerError)
@@ -114,18 +106,18 @@ func routeGetServingURL(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(""))
 		return
 	}
-	_, err = makeServingURLFromGCS(ctx, query.imageURL)
+	if query.imageURL == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(""))
+		return
+	}
+	servingURL, err := makeServingURLFromGCS(ctx, query.imageURL)
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
 		w.Write([]byte(err.Error()))
 		return
 	}
-	// if err = replyWithServingURL(ctx, servingURL, query.callbackURL); err != nil {
-	// 	w.WriteHeader(http.StatusInternalServerError)
-	// 	w.Write([]byte(""))
-	// 	return
-	// }
-	w.Write([]byte(""))
+	w.Write([]byte(servingURL))
 	return
 }
 
@@ -135,39 +127,17 @@ func servingURLExternal(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(""))
 		return
 	}
-	query, err := requireQueryParams(r)
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(err.Error()))
-		return
-	}
+	query := makeQueryParams(r)
 	ctx := appengine.NewContext(r)
-	_, err = makeServingURLFromExternal(ctx, query.imageName, query.imageURL)
+	servingURL, err := makeServingURLFromExternal(ctx, query.imageName, query.imageURL)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(err.Error()))
 		return
 	}
-	// if err = replyWithServingURL(ctx, servingURL, query.callbackURL); err != nil {
-	// 	w.WriteHeader(http.StatusInternalServerError)
-	// 	w.Write([]byte(""))
-	// 	return
-	// }
-	w.Write([]byte(""))
+	w.Write([]byte(servingURL))
 	return
 }
-
-// func replyWithServingURL(ctx context.Context, servingURL, callback string) error {
-// 	client := urlfetch.Client(ctx)
-// 	body := bytes.NewReader([]byte(servingURL))
-// 	resp, err := client.Post(callback, "text/plain", body)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	log.Infof(ctx, "Sent serving URL to callback %s. Response: %d %s", callback, resp.StatusCode, resp.Status)
-// 	defer resp.Body.Close()
-// 	return nil
-// }
 
 func sendToTaskQueue(ctx context.Context, query *queryParams) error {
 	params := url.Values{}
@@ -218,16 +188,6 @@ func makeServingURLFromGCS(ctx context.Context, gcsFileName string) (string, err
 	URL, err := img.CreateServingURL(ctx, bucketName)
 	if err != nil {
 		return "", err
-	}
-	conn, err := db.Conn(ctx)
-	if err != nil {
-		log.Criticalf(ctx, "%+v\n", err)
-		return "", internalErrors.ErrSaveToDBFailed
-	}
-	defer conn.Close()
-	if err = img.SaveURLToDB(ctx, conn); err != nil {
-		log.Criticalf(ctx, "%+v\n", err)
-		return "", internalErrors.ErrSaveToDBFailed
 	}
 	return URL, nil
 }
