@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -34,9 +33,6 @@ type Image struct {
 }
 
 type filename string
-
-// FileName is a context key for the image file name
-var FileName = filename("fileName")
 
 // DownloadImage fetches the image from the source url
 func DownloadImage(ctx context.Context, client *http.Client, url, fileName string) (*Image, error) {
@@ -87,14 +83,14 @@ func (img *Image) SaveToGCS(ctx context.Context, bucketName string) error {
 func (img *Image) CreateServingURL(ctx context.Context, bucketName string) (string, error) {
 	blobKey, err := blobstore.BlobKeyForFile(ctx, fmt.Sprintf("/gs/%s/%s", bucketName, img.FileName))
 	if err != nil {
-		return "", err
+		return "", errors.Wrap(err, "Could not create serving URL")
 	}
 	servingURL, err := image.ServingURL(ctx, blobKey, &image.ServingURLOptions{
 		Secure: true,
 		Size:   450,
 	})
 	if err != nil {
-		return "", err
+		return "", errors.Wrap(err, "Could not create serving URL")
 	}
 	img.ServingURL = servingURL.String()
 	return img.ServingURL, nil
@@ -121,11 +117,8 @@ func (img *Image) DeleteFromGCS(ctx context.Context, bucketName string) error {
 // SaveURLToDB stores the serving URL and the GCS image location in the database
 func (img *Image) SaveURLToDB(ctx context.Context, db *sql.Conn) error {
 	parts := strings.Split(img.FileName, "/")
-	ID, err := strconv.Atoi(parts[len(parts)-1])
-	if err != nil {
-		return err
-	}
-	_, err = db.ExecContext(ctx,
+	ID := parts[len(parts)-1]
+	_, err := db.ExecContext(ctx,
 		"UPDATE products SET image_url = ?, image_location = ? WHERE id = ?",
 		img.ServingURL, img.FileName, ID)
 	if err != nil {

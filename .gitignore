@@ -38,6 +38,9 @@
 !.vscode/launch.json
 !.vscode/extensions.json
 
+# Goland IDE
+.idea/*
+
 
 # End of https://www.gitignore.io/api/linux,visualstudiocode,go
 

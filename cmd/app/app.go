@@ -27,9 +27,9 @@ import (
 )
 
 const (
-	externalImageURL = "externalImageURL"
-	productID        = "productID"
-	callbackURL      = "callbackURL"
+	imageLocation = "imageLocation"
+	imageName     = "imageName"
+	callbackURL   = "callbackURL"
 )
 
 var (
@@ -75,23 +75,23 @@ func warmUp(w http.ResponseWriter, r *http.Request) {
 }
 
 type queryParams struct {
-	imageName string
-	imageURL  string
+	imageName     string
+	imageLocation string
 }
 
 func makeQueryParams(r *http.Request) *queryParams {
 	query := r.URL.Query()
 	return &queryParams{
-		imageName: query.Get(productID),
-		imageURL:  query.Get(externalImageURL),
+		imageName:     query.Get(imageName),
+		imageLocation: query.Get(imageLocation),
 	}
 }
 
 func routeGetServingURL(w http.ResponseWriter, r *http.Request) {
 	query := makeQueryParams(r)
 	ctx := appengine.NewContext(r)
-	if strings.HasPrefix(query.imageURL, "http") {
-		if query.imageURL == "" || query.imageName == "" {
+	if strings.HasPrefix(query.imageLocation, "http") {
+		if query.imageLocation == "" || query.imageName == "" {
 			w.WriteHeader(http.StatusBadRequest)
 			w.Write([]byte(""))
 			return
@@ -106,12 +106,12 @@ func routeGetServingURL(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(""))
 		return
 	}
-	if query.imageURL == "" {
+	if query.imageLocation == "" {
 		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte(""))
 		return
 	}
-	servingURL, err := makeServingURLFromGCS(ctx, query.imageURL)
+	servingURL, err := makeServingURLFromGCS(ctx, query.imageLocation)
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
 		w.Write([]byte(err.Error()))
@@ -129,7 +129,7 @@ func servingURLExternal(w http.ResponseWriter, r *http.Request) {
 	}
 	query := makeQueryParams(r)
 	ctx := appengine.NewContext(r)
-	servingURL, err := makeServingURLFromExternal(ctx, query.imageName, query.imageURL)
+	servingURL, err := makeServingURLFromExternal(ctx, query.imageName, query.imageLocation)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(err.Error()))
@@ -141,8 +141,8 @@ func servingURLExternal(w http.ResponseWriter, r *http.Request) {
 
 func sendToTaskQueue(ctx context.Context, query *queryParams) error {
 	params := url.Values{}
-	params.Add(productID, query.imageName)
-	params.Add(externalImageURL, query.imageURL)
+	params.Add(imageName, query.imageName)
+	params.Add(imageLocation, query.imageLocation)
 	task := taskqueue.Task{
 		Method:       http.MethodGet,
 		Path:         "/servingURLExternal?" + params.Encode(),
@@ -187,31 +187,32 @@ func makeServingURLFromGCS(ctx context.Context, gcsFileName string) (string, err
 	img := &image.Image{FileName: gcsFileName}
 	URL, err := img.CreateServingURL(ctx, bucketName)
 	if err != nil {
-		return "", err
+		log.Criticalf(ctx, "%+v\n", err)
+		return "", internalErrors.ErrMakeServingURLFailed
 	}
 	return URL, nil
 }
 
 func deleteServingURL(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
-	product := query.Get(productID)
-	if product == "" {
+	fileName := query.Get(imageLocation)
+	if fileName == "" {
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte("No product ID in request query\n"))
+		w.Write([]byte("No image location in request query\n"))
 		return
 	}
 	ctx := appengine.NewContext(r)
-	img := &image.Image{FileName: relativeFilePath(product)}
+	img := &image.Image{FileName: fileName}
 	if err := img.DeleteServingURL(ctx, bucketName); err != nil {
 		log.Criticalf(ctx, "Deleting serving URL failed with error: %+v\n", err)
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(fmt.Sprintf("Could not delete serving URL for image %s, please retry\n", product)))
+		w.Write([]byte(fmt.Sprintf("Could not delete serving URL for image %s, please retry\n", fileName)))
 		return
 	}
 	if err := img.DeleteFromGCS(ctx, bucketName); err != nil {
 		log.Criticalf(ctx, "Deleting image failed with error: %+v\n", err)
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(fmt.Sprintf("Could not delete image %s, please retry\n", product)))
+		w.Write([]byte(fmt.Sprintf("Could not delete image %s, please retry\n", fileName)))
 		return
 	}
 	w.WriteHeader(http.StatusOK)
